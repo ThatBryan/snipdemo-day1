@@ -1,0 +1,4 @@
+# Local frontend dependencies and build output from the component branch.
+/.angular/
+/dist/
+/node_modules/
