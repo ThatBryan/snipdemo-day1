@@ -46,6 +46,24 @@ function assertClean(cwd, name) {
   }
 }
 
+function assertMainReady() {
+  const staged = git(root, ["diff", "--cached", "--name-only"], { capture: true }).trim();
+  if (staged) {
+    throw new Error(`main has staged changes:\n${staged}`);
+  }
+
+  const status = git(root, ["status", "--porcelain"], { capture: true }).trim();
+  const unexpected = status
+    ? status.split(/\r?\n/).filter((line) => {
+        const pathName = line.slice(3).replace(/^"|"$/g, "");
+        return !["backend", "frontend", "cli", "bundle"].includes(pathName);
+      })
+    : [];
+  if (unexpected.length > 0) {
+    throw new Error(`main has uncommitted non-submodule changes:\n${unexpected.join("\n")}`);
+  }
+}
+
 function hasStagedChanges(cwd) {
   const result = spawnSync("git", ["diff", "--cached", "--quiet"], {
     cwd,
@@ -82,7 +100,7 @@ function commit(cwd, message) {
 if (git(root, ["branch", "--show-current"], { capture: true }).trim() !== "main") {
   throw new Error("Run this script from the main superproject branch.");
 }
-assertClean(root, "main");
+assertMainReady();
 for (const name of ["backend", "frontend", "cli", "bundle"]) {
   assertClean(path.join(root, name), `${name} submodule`);
 }
