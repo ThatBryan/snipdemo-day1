@@ -52,7 +52,7 @@ function assertMainReady() {
     throw new Error(`main has staged changes:\n${staged}`);
   }
 
-  const status = git(root, ["status", "--porcelain"], { capture: true }).trim();
+  const status = git(root, ["status", "--porcelain"], { capture: true }).trimEnd();
   const unexpected = status
     ? status.split(/\r?\n/).filter((line) => {
         const pathName = line.slice(3).replace(/^"|"$/g, "");
