@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const bundleDir = path.join(root, "bundle");
 const frontendDir = path.join(root, "frontend");
+const cliDir = path.join(root, "cli");
 const pushMain = process.argv.slice(2).includes("--push");
 const extraArgs = process.argv.slice(2).filter((arg) => arg !== "--push");
 
@@ -107,7 +108,7 @@ await cp(path.join(frontendDir, "dist", "snip-frontend", "browser"), path.join(b
   recursive: true,
 });
 await cp(path.join(root, "backend", "server.js"), path.join(bundleDir, "server.js"));
-await cp(path.join(root, "cli", "cli.js"), path.join(bundleDir, "cli.js"));
+await cp(path.join(cliDir, "cli.js"), path.join(bundleDir, "cli.js"));
 await writeFile(
   path.join(bundleDir, ".env"),
   "PUBLIC_DIR=./public\n",
@@ -159,6 +160,12 @@ await writeFile(
 );
 
 git(bundleDir, ["add", "-A"]);
+const cliTreeEntry = git(cliDir, ["ls-tree", "HEAD", "--", "cli.js"], { capture: true }).trim();
+const cliMode = cliTreeEntry.split(/\s+/, 1)[0];
+if (cliMode !== "100644" && cliMode !== "100755") {
+  throw new Error(`Unexpected cli.js Git mode: ${cliMode || "missing"}`);
+}
+git(bundleDir, ["update-index", `--chmod=${cliMode === "100755" ? "+x" : "-x"}`, "--", "cli.js"]);
 if (hasStagedChanges(bundleDir)) {
   commit(bundleDir, "Build Snip release bundle");
   console.log("bundle: committed generated release");
