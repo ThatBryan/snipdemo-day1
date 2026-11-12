@@ -117,7 +117,7 @@ jobs:
           SNIP_API=http://localhost:3000 node ./bundle/cli.js ls | grep -F "$code"
 
       - name: Scan image for high and critical vulnerabilities
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: snip:security-check
           format: table
