@@ -113,7 +113,7 @@ if (frontendStatus) {
 }
 
 const isWindows = process.platform === "win32";
-run(isWindows ? "npm.cmd" : "npm", ["install"], frontendDir, { shell: isWindows });
+run(isWindows ? "npm.cmd" : "npm", ["ci"], frontendDir, { shell: isWindows });
 run(isWindows ? "npx.cmd" : "npx", ["ng", "build"], frontendDir, { shell: isWindows });
 
 assertClean(frontendDir, "frontend submodule after build");
