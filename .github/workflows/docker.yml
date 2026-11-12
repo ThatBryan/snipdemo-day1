@@ -1,0 +1,156 @@
+name: Build and push image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - bundle
+      - .github/workflows/docker.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          submodules: recursive
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Audit frontend dependencies
+        run: npm audit --prefix frontend --audit-level=high
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          submodules: recursive
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Run frontend tests
+        run: npm test --prefix frontend -- --watch=false --browsers=ChromeHeadless
+
+      - name: Build frontend
+        run: npm run build --prefix frontend
+
+      - name: Verify Angular output
+        run: test -f frontend/dist/snip-frontend/browser/index.html
+
+  build-scan-publish:
+    needs:
+      - dependency-scan
+      - frontend-tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out main and all submodules
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          submodules: recursive
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build local image for smoke and vulnerability checks
+        uses: docker/build-push-action@v6
+        with:
+          context: ./bundle
+          load: true
+          tags: snip:security-check
+
+      - name: Smoke-test API, redirects, and CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            status=$?
+            if [ "$status" -ne 0 ]; then
+              docker logs snip-smoke || true
+            fi
+            docker rm -f snip-smoke >/dev/null 2>&1 || true
+            exit "$status"
+          }
+          trap cleanup EXIT
+          docker run -d --name snip-smoke -p 3000:3000 \
+            -e BASE_URL=http://localhost:3000 snip:security-check
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/api/links >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          created="$(curl -fsS -X POST http://localhost:3000/api/links \
+            -H 'content-type: application/json' \
+            -d '{"url":"https://example.com"}')"
+          code="$(printf '%s' "$created" | jq -r '.code')"
+          test -n "$code"
+          curl -fsS http://localhost:3000/api/links | jq -e --arg code "$code" \
+            'any(.[]; .code == $code)' >/dev/null
+          status="$(curl -sS -o /dev/null -w '%{http_code}' \
+            "http://localhost:3000/$code")"
+          test "$status" = "302"
+          curl -fsS http://localhost:3000/api/links | jq -e --arg code "$code" \
+            'any(.[]; .code == $code and .hits == 1)' >/dev/null
+          SNIP_API=http://localhost:3000 node ./bundle/cli.js ls | grep -F "$code"
+
+      - name: Scan image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: snip:security-check
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+
+      - name: Derive lowercase image name
+        id: image-name
+        shell: bash
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate image tags
+        id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image-name.outputs.image }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push verified image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./bundle
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
