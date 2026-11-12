@@ -76,3 +76,22 @@ git push
 Repeat with `frontend` or `cli` as appropriate. Rebuild the generated release
 with `node scripts/build-bundle.mjs`; pass `--push` to push the `main` update as
 well as the generated `bundle` branch.
+
+## Generated release and CI
+
+`bundle/` is generated output; do not edit its server, CLI, or built UI by hand.
+The build script updates the three source submodules, builds Angular to
+`dist/snip-frontend/browser`, assembles the Docker/Railway release, commits the
+bundle output if it changed, and advances the `main` gitlinks. It is safe to run
+again when nothing changed.
+
+```sh
+node scripts/build-bundle.mjs
+node scripts/build-bundle.mjs --push
+docker build -t snip ./bundle
+docker run --rm -p 3000:3000 snip
+```
+
+GitHub Actions rebuilds the bundle hourly or on manual dispatch. Docker images
+are published to GHCR when `main` pins a new bundle revision, or on manual
+dispatch.
